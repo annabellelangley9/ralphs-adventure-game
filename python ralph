@@ -1,0 +1,277 @@
+import pygame
+import random
+import math
+import sys
+
+# Ralph's Adventure - Pygame port of the provided HTML/JS game
+# Controls: WASD or Arrow keys. Collect hearts, avoid villains, return to Tower of London (safe zone) with all hearts to win.
+# Requirements: pygame (pip install pygame)
+
+pygame.init()
+
+# Window / map size (approximate to original)
+MAP_W, MAP_H = 950, 560
+WINDOW_W, WINDOW_H = MAP_W + 40, MAP_H + 40
+screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+pygame.display.set_caption("Ralph's Adventure - Pygame")
+
+clock = pygame.time.Clock()
+FONT = pygame.font.SysFont(None, 28)
+BIG_FONT = pygame.font.SysFont(None, 48)
+
+# Colors
+BG_COLOR = (135, 206, 235)  # sky blue game map bg
+BORDER_COLOR = (65, 105, 225)  # royal blue
+HUD_BG = (255, 255, 255, 230)
+
+# Player
+player_x, player_y = 100, 50
+PLAYER_SPEED = 6
+player_radius = 18
+
+# HUD state
+lives = 5
+hearts_collected = 0
+TOTAL_HEARTS = 15
+invincible = False
+invincible_timer = 0
+
+# Safe zone (Tower of London) approx position
+tower_x, tower_y = 80, 30
+tower_radius = 60
+
+# London Eye (alt win) approx position
+london_eye_x, london_eye_y = 850, 500
+london_eye_radius = 60
+
+# Annabelle position (for display)
+annabelle_x, annabelle_y = 810, 420
+
+# Hearts (positions copied/translated from HTML)
+heart_positions = [
+    (150, 80), (300, 60), (450, 120),
+    (600, 90), (750, 70), (200, 200),
+    (500, 220), (100, 280), (350, 320),
+    (650, 280), (180, 400), (450, 450),
+    (650, 420), (300, 500), (800, 480)
+]
+
+hearts = [{'pos': list(p), 'collected': False} for p in heart_positions]
+
+# Villains: types are just for display; movement random
+villain_emojis = ['💣', '🥷', '🔪', '🦹‍♂️']
+villains = []
+villain_positions = [
+    (250, 150), (400, 180), (550, 140),
+    (150, 250), (450, 240), (600, 260),
+    (300, 380), (550, 360), (200, 450),
+    (700, 200), (120, 380), (750, 280),
+    (350, 280), (500, 380), (700, 450)
+]
+
+for i, p in enumerate(villain_positions):
+    villains.append({
+        'pos': [float(p[0]), float(p[1])],
+        'dx': (random.random() - 0.5) * 2,
+        'dy': (random.random() - 0.5) * 2,
+        'emoji': villain_emojis[i % len(villain_emojis)]
+    })
+
+def distance(a, b):
+    return math.hypot(a[0]-b[0], a[1]-b[1])
+
+def reset_player():
+    global player_x, player_y, invincible, invincible_timer
+    player_x, player_y = 100, 50
+    invincible = True
+    invincible_timer = 120  # frames (~2 seconds at 60fps)
+
+def lose_life():
+    global lives, invincible, invincible_timer
+    lives -= 1
+    reset_player()
+
+def win_game():
+    # Display a simple acknowledgement screen and wait for restart or quit
+    msg = "🎉 YOU WIN! 🎉"
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_r, pygame.K_SPACE):
+                main()  # restart
+                return
+        screen.fill((0,0,0))
+        text = BIG_FONT.render(msg, True, (255,255,255))
+        sub = FONT.render("Press R or Space to play again, or close the window to quit.", True, (255,255,255))
+        screen.blit(text, (WINDOW_W//2 - text.get_width()//2, WINDOW_H//2-40))
+        screen.blit(sub, (WINDOW_W//2 - sub.get_width()//2, WINDOW_H//2 + 20))
+        pygame.display.flip()
+        clock.tick(30)
+
+def game_over():
+    msg = "💔 YOU LOSE 💔"
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_r, pygame.K_SPACE):
+                main()  # restart
+                return
+        screen.fill((0,0,0))
+        text = BIG_FONT.render(msg, True, (255,255,255))
+        sub = FONT.render("Press R or Space to try again, or close the window to quit.", True, (255,255,255))
+        screen.blit(text, (WINDOW_W//2 - text.get_width()//2, WINDOW_H//2-40))
+        screen.blit(sub, (WINDOW_W//2 - sub.get_width()//2, WINDOW_H//2 + 20))
+        pygame.display.flip()
+        clock.tick(30)
+
+def main():
+    global player_x, player_y, hearts_collected, lives, invincible, invincible_timer
+
+    # Reset state
+    player_x, player_y = 100, 50
+    lives = 5
+    hearts_collected = 0
+    for h in hearts:
+        h['collected'] = False
+    for v in villains:
+        v['dx'] = (random.random() - 0.5) * 2
+        v['dy'] = (random.random() - 0.5) * 2
+
+    running = True
+
+    while running:
+        dt = clock.tick(60)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            player_y -= PLAYER_SPEED
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            player_y += PLAYER_SPEED
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            player_x -= PLAYER_SPEED
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            player_x += PLAYER_SPEED
+
+        # keep player in bounds (approx)
+        player_x = max(10, min(MAP_W - 10, player_x))
+        player_y = max(10, min(MAP_H - 10, player_y))
+
+        # Move villains and bounce
+        for v in villains:
+            v['pos'][0] += v['dx'] * 1.5
+            v['pos'][1] += v['dy'] * 1.5
+            if v['pos'][0] <= 20 or v['pos'][0] >= MAP_W - 10:
+                v['dx'] *= -1
+            if v['pos'][1] <= 20 or v['pos'][1] >= MAP_H - 10:
+                v['dy'] *= -1
+            v['pos'][0] = max(20, min(MAP_W - 10, v['pos'][0]))
+            v['pos'][1] = max(20, min(MAP_H - 10, v['pos'][1]))
+
+        # Collision: hearts
+        for h in hearts:
+            if not h['collected'] and distance((player_x, player_y), h['pos']) < 32:
+                h['collected'] = True
+                hearts_collected += 1
+
+        # Check safe zone
+        in_safe_zone = distance((player_x, player_y), (tower_x, tower_y)) < tower_radius
+
+        # Villain collision (only if not in safe zone and not invincible)
+        if not in_safe_zone and not invincible:
+            for v in villains:
+                if distance((player_x, player_y), v['pos']) < 35:
+                    lose_life()
+                    invincible = True
+                    invincible_timer = 120
+                    break
+
+        # Win condition: all hearts and at tower or at london eye
+        if hearts_collected >= TOTAL_HEARTS and (in_safe_zone or distance((player_x, player_y), (london_eye_x, london_eye_y)) < london_eye_radius):
+            win_game()
+            return
+
+        # Lose condition
+        if lives <= 0:
+            game_over()
+            return
+
+        # Invincible timer countdown
+        if invincible:
+            invincible_timer -= 1
+            if invincible_timer <= 0:
+                invincible = False
+
+        # --- Drawing ---
+        screen.fill(BG_COLOR)
+
+        # Map border
+        pygame.draw.rect(screen, BORDER_COLOR, (10, 10, MAP_W, MAP_H), 6, border_radius=20)
+
+        # Tower (safe zone)
+        pygame.draw.circle(screen, (200, 180, 150), (tower_x, tower_y), 28)  # castle icon base
+        tower_label = FONT.render("🏰", True, (0,0,0))
+        screen.blit(tower_label, (tower_x-12, tower_y-18))
+
+        # London Eye and Annabelle
+        eye_label = FONT.render("🎡", True, (0,0,0))
+        screen.blit(eye_label, (london_eye_x-18, london_eye_y-24))
+        annabel_label = FONT.render("👱‍♀️", True, (0,0,0))
+        screen.blit(annabel_label, (annabelle_x-12, annabelle_y-18))
+
+        # Hearts
+        for h in hearts:
+            if not h['collected']:
+                heart_label = FONT.render("🚂💖", True, (0,0,0))
+                screen.blit(heart_label, (h['pos'][0]-12, h['pos'][1]-12))
+            else:
+                # dimmed small marker
+                small = FONT.render("❤", True, (100,100,100))
+                screen.blit(small, (h['pos'][0]-6, h['pos'][1]-6))
+
+        # Villains
+        for v in villains:
+            try:
+                lab = FONT.render(v['emoji'], True, (0,0,0))
+                screen.blit(lab, (v['pos'][0]-12, v['pos'][1]-12))
+            except Exception:
+                pygame.draw.circle(screen, (200,0,0), (int(v['pos'][0]), int(v['pos'][1])), 12)
+
+        # Player (flash when invincible)
+        player_color = (255, 230, 125) if not invincible or (invincible_timer // 6) % 2 == 0 else (255,255,255)
+        pygame.draw.circle(screen, player_color, (int(player_x), int(player_y)), player_radius)
+        pl_text = FONT.render("👨", True, (0,0,0))
+        screen.blit(pl_text, (player_x-12, player_y-18))
+
+        # HUD
+        hud_surf = pygame.Surface((260, 60), pygame.SRCALPHA)
+        hud_surf.fill((255,255,255,220))
+        screen.blit(hud_surf, (14,14))
+        lives_text = FONT.render(f"❤️ Lives: {lives}", True, (0,0,0))
+        hearts_text = FONT.render(f"💖 Hearts: {hearts_collected}/{TOTAL_HEARTS}", True, (0,0,0))
+        screen.blit(lives_text, (20,20))
+        screen.blit(hearts_text, (20,42))
+
+        # Instructions
+        instr_surf = pygame.Surface((360, 30), pygame.SRCALPHA)
+        instr_surf.fill((255,255,255,220))
+        screen.blit(instr_surf, (14, WINDOW_H - 44))
+        instr_text = FONT.render("Use WASD or Arrow Keys to move Ralph around London! Press Esc to quit.", True, (0,0,0))
+        screen.blit(instr_text, (20, WINDOW_H - 40))
+
+        pygame.display.flip()
+
+        # handle immediate keys like Escape
+        if keys[pygame.K_ESCAPE]:
+            running = False
+
+    pygame.quit()
+
+if __name__ == '__main__':
+    main()
